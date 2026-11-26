@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YGO小工具 - 決鬥者卡片效果檢索 & 線上演牌工具</title>
+
+  <!-- 引入 OpenCC (簡體/繁體中文台灣用語即時轉換) -->
+  <script src="https://cdn.jsdelivr.net/npm/opencc-js@1.0.5/dist/umd/full.js"></script>
+  <!-- 引入 Tesseract.js 純前端 OCR 引擎 -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+
+  <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+
+  <!-- ================= 頂部導航欄 ================= -->
+  <header class="app-header">
+    <div class="header-container">
+      <div class="brand" onclick="location.reload()">
+        <div class="brand-text">
+          <h1>YGO小工具</h1>
+        </div>
+      </div>
+
+      <!-- 頂部即時搜尋列 -->
+      <div class="header-search">
+        <div class="search-input-wrapper">
+          <span class="search-icon">🔍</span>
+          <input type="text" id="mainSearchInput" class="main-search-input" placeholder="搜尋卡名、效果、卡密..."
+            autocomplete="off" spellcheck="false">
+          <button id="searchClearBtn" class="search-clear-btn" title="清除搜尋">✕</button>
+        </div>
+
+        <!-- 獨立的「搜尋範圍」選單欄位 (移出搜尋框外獨立一欄，絕不遮擋輸入框文字) -->
+        <div class="search-scope-wrapper">
+          <select id="searchScopeSelect" class="search-scope-select" title="搜尋範圍">
+            <option value="all">全部欄位</option>
+            <option value="name">僅卡名</option>
+            <option value="desc">僅效果文</option>
+            <option value="archetype">🏷️ 字段</option>
+            <option value="id">僅 卡密</option>
+          </select>
+        </div>
+
+        <!-- 獨立的「📷 掃卡」欄位按鈕 (位於搜尋UI右邊，不塞在搜尋框內) -->
+        <button id="btnOpenScanner" class="search-scanner-btn" title="📷 鏡頭掃卡 (辨識左下角卡密/卡名)">
+          <span class="scanner-btn-icon">📷</span>
+          <span class="scanner-btn-text" data-i18n-tw="掃卡" data-i18n-cn="扫卡">掃卡</span>
+        </button>
+      </div>
+
+      <!-- 頂部控制按鈕 -->
+      <div class="header-actions">
+        <div class="cache-status-group">
+          <div class="cache-status-pill" title="本地 IndexedDB 已快取卡片數量">
+            <span class="cache-dot"></span>
+            <span id="cacheCounter">50 張</span>
+          </div>
+          <button id="btnClearCache" class="btn-clear-cache" title="清除所有本地快取資料庫（還原為初始預載卡片）">
+            <span>🗑️</span>
+            <span class="btn-clear-cache-text" data-i18n-tw="清除快取" data-i18n-cn="清除缓存">清除快取</span>
+          </button>
+        </div>
+
+        <button id="btnLangToggle" class="btn-lang-toggle" title="切換繁體中文(台灣用語) / 簡體中文">
+          <span class="lang-badge">🌐</span>
+          <span id="langBtnText">
+            <span class="lang-full">繁體中文 (台灣)</span>
+            <span class="lang-short">繁中</span>
+          </span>
+        </button>
+
+        <button id="btnDeckTray" class="btn-deck-tray" title="開啟牌組面板">
+          <span id="navDeckTrayLabel"><span>🎴 牌組</span></span>
+          <span id="deckTotalBadge" class="deck-count-badge" style="display: none;">0</span>
+        </button>
+
+        <!-- 行動版/平板專用篩選按鈕 (RWD 響應式) -->
+        <button id="btnMobileFilter" class="btn-mobile-filter" title="開啟多維度篩選抽屜">
+          <span>🎯</span>
+          <span class="filter-btn-text" data-i18n-tw="篩選" data-i18n-cn="筛选">篩選</span>
+          <span id="filterActiveBadge" class="filter-active-badge" style="display:none;">0</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ================= 主畫面佈局 (三欄：篩選器 | 搜尋結果 | 卡片詳情) ================= -->
+  <div class="app-main">
+
+    <!-- 左欄：多維度篩選器 -->
+    <aside class="filter-sidebar">
+      <div class="filter-header">
+        <div class="filter-title">
+          <span>🎯</span>
+          <span data-i18n-tw="多維度卡片篩選" data-i18n-cn="多维度卡片筛选">多維度卡片篩選</span>
+        </div>
+        <div class="filter-header-actions">
+          <button id="btnResetFilters" class="btn-reset-filters" data-i18n-tw="重置篩選" data-i18n-cn="重置筛选">重置篩選</button>
+          <button id="btnCloseFilterDrawer" class="btn-close-filter-drawer" title="關閉篩選抽屜">✕</button>
+        </div>
+      </div>
+
+      <!-- 最近搜尋紀錄 -->
+      <div class="filter-section" id="searchHistorySection">
+        <div class="section-label-row">
+          <div class="section-label" data-i18n-tw="最近搜尋紀錄" data-i18n-cn="最近搜索记录">🕒 最近搜尋紀錄</div>
+          <button id="btnClearSearchHistory" class="btn-clear-history" title="清除所有搜尋紀錄" data-i18n-tw="清除"
+            data-i18n-cn="清除">清除</button>
+        </div>
+        <div class="search-history-chips" id="searchHistoryChips">
+          <!-- 動態載入搜尋紀錄 -->
+        </div>
+      </div>
+
+      <!-- 卡片主要大類別分段器 -->
+      <div class="filter-section">
+        <div class="section-label" data-i18n-tw="卡片種類" data-i18n-cn="卡片种类">卡片種類</div>
+        <div class="type-segmented-control">
+          <button class="segment-btn active" data-category="ALL" data-i18n-tw="全部" data-i18n-cn="全部">全部</button>
+          <button class="segment-btn" data-category="MONSTER" data-i18n-tw="怪獸" data-i18n-cn="怪兽">怪獸</button>
+          <button class="segment-btn" data-category="SPELL" data-i18n-tw="魔法" data-i18n-cn="魔法">魔法</button>
+          <button class="segment-btn" data-category="TRAP" data-i18n-tw="陷阱" data-i18n-cn="陷阱">陷阱</button>
+        </div>
+      </div>
+
+      <!-- 怪獸特殊類別子過濾 -->
+      <div class="filter-section" id="monsterFilterSection">
+        <div class="section-label" data-i18n-tw="怪獸特性 / 召喚方式" data-i18n-cn="怪兽特性 / 召唤方式">怪獸特性 / 召喚方式</div>
+        <div class="filter-tags-grid">
+          <div class="tag-checkbox-btn" data-monster-type="16">通常</div>
+          <div class="tag-checkbox-btn" data-monster-type="32">效果</div>
+          <div class="tag-checkbox-btn" data-monster-type="64">融合</div>
+          <div class="tag-checkbox-btn" data-monster-type="128">儀式</div>
+          <div class="tag-checkbox-btn" data-monster-type="8192">同步</div>
+          <div class="tag-checkbox-btn" data-monster-type="8388608">超量</div>
+          <div class="tag-checkbox-btn" data-monster-type="16777216">靈擺</div>
+          <div class="tag-checkbox-btn" data-monster-type="67108864">連結</div>
+          <div class="tag-checkbox-btn" data-monster-type="4096">協調</div>
+          <div class="tag-checkbox-btn" data-monster-type="33554432" title="規則上的「特殊召喚怪獸」：不能通常召喚，僅限依特定手續特殊召喚（如壞獸、開闢使者）"
+            data-i18n-tw="特召怪" data-i18n-cn="特召怪">特召怪</div>
+        </div>
+      </div>
+
+      <!-- 連結怪獸八向箭頭過濾器 (Link Markers) -->
+      <div class="filter-section" id="linkMarkerSection">
+        <div class="section-label-row">
+          <div class="section-label" data-i18n-tw="連結標記方位 (Link Markers)" data-i18n-cn="连接标记方位 (Link Markers)">連結標記方位
+            (Link Markers)</div>
+          <button class="btn-text-reset" id="btnResetLinkMarkers" title="清空箭頭">重設</button>
+        </div>
+        <div class="link-marker-pad-container">
+          <div class="link-marker-pad">
+            <button class="link-arrow-btn" data-marker="64" data-dir="TL" title="左上 (↖)">↖</button>
+            <button class="link-arrow-btn" data-marker="128" data-dir="T" title="上 (↑)">↑</button>
+            <button class="link-arrow-btn" data-marker="256" data-dir="TR" title="右上 (↗)">↗</button>
+            <button class="link-arrow-btn" data-marker="8" data-dir="L" title="左 (←)">←</button>
+            <div class="link-marker-center" title="LINK 標記">LINK</div>
+            <button class="link-arrow-btn" data-marker="32" data-dir="R" title="右 (→)">→</button>
+            <button class="link-arrow-btn" data-marker="1" data-dir="BL" title="左下 (↙)">↙</button>
+            <button class="link-arrow-btn" data-marker="2" data-dir="B" title="下 (↓)">↓</button>
+            <button class="link-arrow-btn" data-marker="4" data-dir="BR" title="右下 (↘)">↘</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 魔法卡子分類 -->
+      <div class="filter-section" id="spellFilterSection">
+        <div class="section-label" data-i18n-tw="魔法卡種類" data-i18n-cn="魔法卡种类">魔法卡種類</div>
+        <div class="filter-tags-grid">
+          <div class="tag-checkbox-btn" data-spell-type="2">通常</div>
+          <div class="tag-checkbox-btn" data-spell-type="65536">速攻</div>
+          <div class="tag-checkbox-btn" data-spell-type="131072">永續</div>
+          <div class="tag-checkbox-btn" data-spell-type="262144">裝備</div>
+          <div class="tag-checkbox-btn" data-spell-type="524288">場地</div>
+          <div class="tag-checkbox-btn" data-spell-type="128">儀式</div>
+        </div>
+      </div>
+
+      <!-- 陷阱卡子分類 -->
+      <div class="filter-section" id="trapFilterSection">
+        <div class="section-label" data-i18n-tw="陷阱卡種類" data-i18n-cn="陷阱卡种类">陷阱卡種類</div>
+        <div class="filter-tags-grid">
+          <div class="tag-checkbox-btn" data-trap-type="4">通常</div>
+          <div class="tag-checkbox-btn" data-trap-type="131072">永續</div>
+          <div class="tag-checkbox-btn" data-trap-type="1048576">反擊</div>
+        </div>
+      </div>
+
+      <!-- 常用效果分類標籤 (Effect Tags) -->
+      <div class="filter-section" id="effectTagFilterSection">
+        <div class="section-label-row">
+          <div class="section-label" data-i18n-tw="常用效果分類" data-i18n-cn="常用效果分类">常用效果分類</div>
+          <button class="btn-text-reset" id="btnResetEffectTags" title="清空效果標籤">重設</button>
+        </div>
+        <div class="filter-tags-grid effect-tags-grid">
+          <div class="tag-checkbox-btn effect-tag-btn" data-effect-tag="SEARCH">📥 檢索/抽牌</div>
+          <div class="tag-checkbox-btn effect-tag-btn" data-effect-tag="SS">⚡ 特殊召喚</div>
+          <div class="tag-checkbox-btn effect-tag-btn" data-effect-tag="NEGATE">🚫 效果無效</div>
+          <div class="tag-checkbox-btn effect-tag-btn" data-effect-tag="DESTROY">💥 破壞卡片</div>
+          <div class="tag-checkbox-btn effect-tag-btn" data-effect-tag="BANISH">🌀 卡片除外</div>
+          <div class="tag-checkbox-btn effect-tag-btn" data-effect-tag="GY">🪦 堆墓/送墓</div>
+          <div class="tag-checkbox-btn effect-tag-btn" data-effect-tag="BOUNCE">↩️ 回手/彈手</div>
+          <div class="tag-checkbox-btn effect-tag-btn" data-effect-tag="PROTECT">🛡️ 抗性/保護</div>
+        </div>
+      </div>
+
+      <!-- 屬性過濾 -->
+      <div class="filter-section">
+        <div class="section-label" data-i18n-tw="屬性" data-i18n-cn="属性">屬性</div>
+        <div class="attribute-chips-row">
+          <div class="attr-chip" data-attr="LIGHT" data-mask="16" title="光屬性">光</div>
+          <div class="attr-chip" data-attr="DARK" data-mask="32" title="暗屬性">暗</div>
+          <div class="attr-chip" data-attr="EARTH" data-mask="1" title="地屬性">地</div>
+          <div class="attr-chip" data-attr="WATER" data-mask="2" title="水屬性">水</div>
+          <div class="attr-chip" data-attr="FIRE" data-mask="4" title="炎屬性">炎</div>
+          <div class="attr-chip" data-attr="WIND" data-mask="8" title="風屬性">風</div>
+          <div class="attr-chip" data-attr="DIVINE" data-mask="64" title="神屬性">神</div>
+        </div>
+      </div>
+
+      <!-- 種族下拉選單 -->
+      <div class="filter-section">
+        <div class="section-label" data-i18n-tw="種族" data-i18n-cn="种族">種族</div>
+        <select id="raceSelect" class="custom-select">
+          <option value="ALL">全部種族</option>
+        </select>
+      </div>
+
+      <!-- 等級/階級/Link -->
+      <div class="filter-section">
+        <div class="section-label" data-i18n-tw="等級 / 階級 / Link" data-i18n-cn="等级 / 阶级 / Link">等級 / 階級 / Link</div>
+        <select id="levelSelect" class="custom-select">
+          <option value="ALL">全部數值</option>
+          <option value="1">★ 1 / Link 1</option>
+          <option value="2">★ 2 / Link 2</option>
+          <option value="3">★ 3 / Link 3</option>
+          <option value="4">★ 4 / Link 4</option>
+          <option value="5">★ 5 / Link 5</option>
+          <option value="6">★ 6 / Link 6</option>
+          <option value="7">★ 7</option>
+          <option value="8">★ 8</option>
+          <option value="9">★ 9</option>
+          <option value="10">★ 10</option>
+          <option value="11">★ 11</option>
+          <option value="12">★ 12</option>
+        </select>
+      </div>
+
+      <!-- 靈擺刻度 (Pendulum Scale) -->
+      <div class="filter-section" id="scaleFilterSection">
+        <div class="section-label" data-i18n-tw="靈擺刻度 (Scale)" data-i18n-cn="灵摆刻度 (Scale)">靈擺刻度 (Scale)</div>
+        <select id="scaleSelect" class="custom-select">
+          <option value="ALL">全部刻度</option>
+          <option value="0">Scale 0</option>
+          <option value="1">Scale 1</option>
+          <option value="2">Scale 2</option>
+          <option value="3">Scale 3</option>
+          <option value="4">Scale 4</option>
+          <option value="5">Scale 5</option>
+          <option value="6">Scale 6</option>
+          <option value="7">Scale 7</option>
+          <option value="8">Scale 8</option>
+          <option value="9">Scale 9</option>
+          <option value="10">Scale 10</option>
+          <option value="11">Scale 11</option>
+          <option value="12">Scale 12</option>
+          <option value="13">Scale 13</option>
+        </select>
+      </div>
+
+      <!-- 攻擊力篩選 -->
+      <div class="filter-section">
+        <div class="section-label" data-i18n-tw="攻擊力 (ATK)" data-i18n-cn="攻击力 (ATK)">攻擊力 (ATK)</div>
+        <div class="stat-filter-row">
+          <input type="number" id="atkMin" class="stat-input" placeholder="下限 (0)" min="0" step="100">
+          <span>~</span>
+          <input type="number" id="atkMax" class="stat-input" placeholder="上限 (5000)" min="0" step="100">
+        </div>
+        <div class="stat-quick-btns">
+          <button class="stat-btn" data-target="atk" data-val="0">0</button>
+          <button class="stat-btn" data-target="atk" data-val="2500">2500+</button>
+          <button class="stat-btn" data-target="atk" data-val="3000">3000+</button>
+          <button class="stat-btn stat-btn-wildcard" id="btnAtkUnknown" data-target="atk" data-val="?"
+            title="攻擊力為 ? 的特殊怪獸">ATK: ?</button>
+        </div>
+      </div>
+
+      <!-- 守備力篩選 -->
+      <div class="filter-section" id="defFilterSection">
+        <div class="section-label" data-i18n-tw="守備力 (DEF)" data-i18n-cn="守备力 (DEF)">守備力 (DEF)</div>
+        <div class="stat-filter-row">
+          <input type="number" id="defMin" class="stat-input" placeholder="下限 (0)" min="0" step="100">
+          <span>~</span>
+          <input type="number" id="defMax" class="stat-input" placeholder="上限 (5000)" min="0" step="100">
+        </div>
+        <div class="stat-quick-btns">
+          <button class="stat-btn" data-target="def" data-val="0">0</button>
+          <button class="stat-btn" data-target="def" data-val="2000">2000+</button>
+          <button class="stat-btn" data-target="def" data-val="2500">2500+</button>
+          <button class="stat-btn stat-btn-wildcard" id="btnDefUnknown" data-target="def" data-val="?"
+            title="守備力為 ? 的特殊怪獸">DEF: ?</button>
+        </div>
+      </div>
+
+      <!-- 禁限規制篩選 -->
+      <div class="filter-section">
+        <div class="section-label" data-i18n-tw="禁限卡表規約 (OCG)" data-i18n-cn="禁限卡表规约 (OCG)">禁限卡表規約 (OCG)</div>
+        <div class="banlist-selector">
+          <div class="ban-pill active" data-ban="ALL">全部</div>
+          <div class="ban-pill" data-ban="3">無限制</div>
+          <div class="ban-pill" data-ban="1">限制(1)</div>
+          <div class="ban-pill" data-ban="0">禁止(0)</div>
+        </div>
+      </div>
+
+      <!-- 行動版篩選抽屜底端完成按鈕 -->
+      <div class="filter-drawer-footer">
+        <button id="btnApplyFilterDrawer" class="btn-apply-filters" data-i18n-tw="完成篩選" data-i18n-cn="完成筛选">✓
+          完成篩選</button>
+      </div>
+    </aside>
+
+    <!-- 中欄：卡片搜尋結果 -->
+    <main class="results-container">
+      <div class="results-toolbar">
+        <div class="results-stats" id="resultsStats">
+          共找到 <strong>0</strong> 張卡片
+        </div>
+        <div class="results-view-controls">
+          <div class="loading-spinner" id="searchSpinner" style="display:none;" title="向百鴿檢索最新卡片中..."></div>
+
+          <select id="sortSelect" class="sort-select" title="排序依據">
+            <option value="relevance">預設相關度</option>
+            <option value="atk_desc">攻擊力 (高到低)</option>
+            <option value="atk_asc">攻擊力 (低到高)</option>
+            <option value="level_desc">等級 (高到低)</option>
+            <option value="id">卡片密碼 ID</option>
+          </select>
+
+          <div class="view-mode-toggle">
+            <button class="view-mode-btn active" data-mode="grid" title="網格大圖檢視">▦</button>
+            <button class="view-mode-btn" data-mode="list" title="精簡列表檢視">☰</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 卡片列表容器 -->
+      <div id="cardGridContainer" class="card-grid"></div>
+    </main>
+
+    <!-- 右欄：卡片效果詳情 Inspector -->
+    <aside class="card-inspector" id="cardInspector">
+      <!-- 由 app.js 動態渲染 -->
+    </aside>
+
+  </div>
+
+  <!-- ================= 響應式抽屜遮罩 (Mobile / Tablet Overlays) ================= -->
+  <div class="filter-drawer-overlay" id="filterDrawerOverlay"></div>
+  <div class="inspector-drawer-overlay" id="inspectorDrawerOverlay"></div>
+
+  <!-- ================= 牌組管理抽屜 (Deck Drawer) ================= -->
+  <div class="deck-drawer-overlay" id="deckDrawerOverlay"></div>
+  <div class="deck-drawer" id="deckDrawer">
+    <div class="drawer-header">
+      <div class="drawer-title">
+        <span>🎴</span>
+        <span data-i18n-tw="牌組清單" data-i18n-cn="牌组清单">牌組清單</span>
+      </div>
+      <button class="drawer-close-btn" id="btnCloseDrawer">✕</button>
+    </div>
+
+    <!-- 牌組切換、新增與取名列 -->
+    <div class="deck-manage-bar">
+      <div class="deck-select-wrap">
+        <select id="deckSelect" class="custom-select deck-select" title="切換當前牌組"></select>
+      </div>
+      <button class="deck-manage-btn btn-add-deck" id="btnNewDeck" title="新增牌組 (為新牌組取名)">
+        <span>➕</span> <span class="deck-btn-text" data-i18n-tw="新牌組" data-i18n-cn="新牌组">新牌組</span>
+      </button>
+      <button class="deck-icon-btn" id="btnRenameDeck" title="重新命名當前牌組">
+        ✏️
+      </button>
+      <button class="deck-icon-btn" id="btnDeleteDeck" title="刪除當前牌組">
+        🗑️
+      </button>
+    </div>
+
+    <div class="drawer-content">
+      <div class="deck-section">
+        <div class="deck-section-title" id="deckMainTitle">主牌組 (Main Deck) <span>0 / 60</span></div>
+        <div class="deck-card-list" id="deckMainList"></div>
+      </div>
+
+      <div class="deck-section">
+        <div class="deck-section-title" id="deckExtraTitle">額外牌組 (Extra Deck) <span>0 / 15</span></div>
+        <div class="deck-card-list" id="deckExtraList"></div>
+      </div>
+    </div>
+
+    <div class="drawer-footer">
+      <div class="deck-export-btns">
+        <button class="action-btn" id="btnImportYdk" title="匯入現有 .ydk 牌組檔案或純文字清單">
+          📥 匯入 .ydk 牌組
+        </button>
+        <button class="action-btn" id="btnExportYdk" title="匯出相容 EDOPRO / YGOPro 的 .ydk 格式">
+          💾 匯出 .ydk 檔案
+        </button>
+      </div>
+      <div class="deck-export-btns">
+        <button class="action-btn" id="btnExportText" title="複製 ID 與卡名純文字">
+          📋 複製文字清單
+        </button>
+        <button class="action-btn" id="btnClearDeck" style="color:#ef4444; border-color:#7f1d1d;">
+          🗑️ 清空牌組
+        </button>
+      </div>
+      <input type="file" id="ydkFileInput" accept=".ydk,.txt" style="display:none;">
+    </div>
+  </div>
+
+  <!-- 牌組自訂命名 Modal 對話框 -->
+  <div class="deck-modal-overlay" id="deckNameModal">
+    <div class="deck-modal-dialog">
+      <div class="deck-modal-header">
+        <h3 id="deckModalTitle" data-i18n-tw="為新牌組取名" data-i18n-cn="为新牌组取名">為新牌組取名</h3>
+        <button class="deck-modal-close" id="btnCloseDeckModal">✕</button>
+      </div>
+      <div class="deck-modal-body">
+        <label for="deckNameInput" class="deck-modal-label" data-i18n-tw="牌組名稱：" data-i18n-cn="牌组名称：">牌組名稱：</label>
+        <input type="text" id="deckNameInput" class="deck-modal-input" placeholder="例如：純愛妖精、光與暗儀式..." maxlength="30"
+          autocomplete="off">
+        <div class="deck-modal-hint" data-i18n-tw="自訂喜愛的牌組名稱，隨時點擊 ✏️ 亦可更名。" data-i18n-cn="自订喜爱的牌组名称，随时点击 ✏️ 亦可更名。">
+          自訂喜愛的牌組名稱，隨時點擊 ✏️ 亦可更名。</div>
+      </div>
+      <div class="deck-modal-footer">
+        <button class="action-btn" id="btnCancelDeckModal">取消</button>
+        <button class="action-btn action-btn-primary" id="btnConfirmDeckModal">確認建立</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 鏡頭掃卡 OCR 彈窗 (Card Scanner Modal) ================= -->
+  <div class="card-scanner-overlay" id="scannerModal">
+    <div class="card-scanner-dialog">
+      <div class="scanner-header">
+        <div class="scanner-header-title">
+          <span class="scanner-icon">📷</span>
+          <h3>鏡頭辨識查卡</h3>
+        </div>
+        <button class="scanner-close-btn" id="btnCloseScanner" title="關閉 (Esc)">✕</button>
+      </div>
+
+      <!-- 顯著提示橫幅 (靠近左下角8位數卡密或卡名) -->
+      <div class="scanner-tip-banner">
+        <span class="tip-icon">💡</span>
+        <span class="tip-text" id="scannerTipText">只需將鏡頭靠近<strong>左下角 8 位數卡密</strong>或<strong>頂部卡名</strong>，無須對準整張卡</span>
+      </div>
+
+      <!-- 模式切換器 (8位卡密模式 / 卡名文字模式) -->
+      <div class="scanner-mode-tabs">
+        <button class="scanner-tab-btn active" data-mode="passcode" id="tabModePasscode">
+          8位數卡密
+        </button>
+        <button class="scanner-tab-btn" data-mode="name" id="tabModeName">
+          卡名文字
+        </button>
+      </div>
+
+      <!-- 視訊取景器區域 -->
+      <div class="scanner-viewport-container" id="scannerViewport">
+        <video id="scannerVideo" class="scanner-video" playsinline autoplay muted></video>
+        <canvas id="scannerCanvas" class="scanner-canvas" style="display:none;"></canvas>
+
+        <!-- 單一聚焦掃描瞄準框 (簡約特寫，無需對齊整張卡) -->
+        <div class="scanner-reticle mode-passcode" id="scannerReticle">
+          <div class="reticle-corner tl"></div>
+          <div class="reticle-corner tr"></div>
+          <div class="reticle-corner bl"></div>
+          <div class="reticle-corner br"></div>
+          <div class="scanner-laser-beam"></div>
+          <div class="reticle-badge" id="reticleBadge">
+            <span id="reticleBadgeText">8位數卡密對準此框</span>
+          </div>
+        </div>
+
+        <!-- 辨識中遮罩與狀態指示 -->
+        <div class="scanner-status-pill" id="scannerStatusPill">
+          <span class="spinner-dot"></span>
+          <span id="scannerStatusText">正在尋找卡密...</span>
+        </div>
+      </div>
+
+      <!-- 底部操作工具列 -->
+      <div class="scanner-toolbar">
+        <button class="scanner-tool-btn scanner-btn-shutter" id="btnScannerShutter" title="拍照立即辨識">
+          📸 拍照辨識
+        </button>
+        <button class="scanner-tool-btn" id="btnSwitchCamera" title="切換前後鏡頭">
+          🔄 翻轉鏡頭
+        </button>
+        <button class="scanner-tool-btn" id="btnToggleTorch" title="開關手電筒補光燈">
+          🔦 補光燈
+        </button>
+        <label class="scanner-tool-btn" id="btnUploadImage" title="從相簿選取卡片照片">
+          🖼️ 相簿選圖
+          <input type="file" id="scannerFileInput" accept="image/*" style="display:none;">
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 卡片完整效果詳情彈窗 (Card Detail Modal) ================= -->
+  <div class="card-modal-overlay" id="cardDetailModal">
+    <div class="card-modal-dialog">
+      <div class="card-modal-header">
+        <div class="card-modal-title-group">
+          <h3 id="cardModalTitle" class="card-modal-title">卡片名稱</h3>
+          <div id="cardModalSubNames" class="card-modal-subnames"></div>
+        </div>
+        <button class="card-modal-close" id="btnCloseCardDetailModal" title="關閉 (Esc)">✕</button>
+      </div>
+      <div class="card-modal-body" id="cardModalBody">
+        <!-- 由 app.js 動態渲染完整卡片效果、數值、卡圖與調整功能 -->
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 卡圖大圖預覽 Lightbox Modal ================= -->
+  <div class="lightbox-modal" id="lightboxModal">
+    <div class="lightbox-content">
+      <button class="lightbox-close-btn" id="lightboxClose">✕</button>
+      <img id="lightboxImg" class="lightbox-img" src="" alt="">
+    </div>
+  </div>
+
+  <!-- 全量繁簡雙向字詞對照庫 (2500+ 字，保證離線與任何新卡皆能 100% 雙向精準轉換) -->
+  <script src="s2t_dict.js"></script>
+  <!-- 引入預載熱門泛用卡資料 (確保開箱立即可用、離線可用) -->
+  <script src="preset_cards.js"></script>
+  <!-- 核心應用程式腳本 -->
+  <script src="app.js"></script>
+</body>
+
+</html>
